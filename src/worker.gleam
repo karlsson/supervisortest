@@ -1,4 +1,4 @@
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/io
 import gleam/otp/actor.{type Started}
@@ -7,7 +7,7 @@ import gleam/string
 pub const my_name = "worker"
 
 type State {
-  State(subject: Subject(WorkerMessage))
+  State(subject: Subject(WorkerMessage), selector: Selector(WorkerMessage))
 }
 
 pub type WorkerMessage =
@@ -17,15 +17,16 @@ pub fn start_link(
   name: process.Name(WorkerMessage),
   subject: Subject(WorkerMessage),
 ) -> Result(process.Pid, a) {
-  let selector1 =
+  let selector =
     process.new_selector() |> process.selecting(subject, function.identity)
-
-  let state = State(subject)
-  let assert Ok(actor.Started(pid, _data)) =
+  let state = State(subject, selector)
+  let initialiser =
     actor.initialised(state)
-    |> actor.selecting(selector1)
+    |> actor.selecting(selector)
     |> actor.returning(subject)
-    |> actor.new()
+
+  let assert Ok(actor.Started(pid, _data)) =
+    actor.new_with_initialiser(1000, fn() { Ok(initialiser) })
     |> actor.on_message(loop)
     |> actor.start()
 
@@ -33,13 +34,7 @@ pub fn start_link(
   Ok(pid)
 }
 
-fn loop(
-  i,
-  msg,
-) -> actor.Next(
-  actor.Initialised(State, WorkerMessage, Subject(WorkerMessage)),
-  b,
-) {
+fn loop(state, msg) {
   case msg {
     #(sender_subject, request) -> {
       case request {
@@ -59,6 +54,5 @@ fn loop(
       }
     }
   }
-
-  actor.continue(i)
+  actor.continue(state)
 }
